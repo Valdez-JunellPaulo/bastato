@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Haunted Shooter 👻</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: black;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+  }
+  canvas {
+    background: #111;
+    display: block;
+    margin: 0 auto;
+    border: 2px solid #333;
+  }
+  #hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-size: 18px;
+    user-select: none;
+  }
+  #jumpscare {
+    position: fixed;
+    inset: 0;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    background: black;
+    z-index: 999;
+  }
+  #jumpscare img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    animation: flash 0.2s alternate infinite;
+  }
+  @keyframes flash {
+    from { filter: brightness(2); }
+    to { filter: brightness(0.5); }
+  }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="600"></canvas>
+<div id="hud">Score: <span id="score">0</span></div>
+
+<!-- jumpscare overlay -->
+<div id="jumpscare">
+  <img id="scareImg" src="https://i.imgur.com/hgPi2uW.jpeg" alt="Scary Face">
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const hudScore = document.getElementById("score");
+const scareDiv = document.getElementById("jumpscare");
+
+const player = { x: 400, y: 300, size: 15, speed: 4 };
+let bullets = [];
+let enemies = [];
+let score = 0;
+
+const keys = {};
+let mouse = { x: 0, y: 0, down: false };
+
+// --- EVENTS ---
+document.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
+document.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
+canvas.addEventListener("mousedown", () => mouse.down = true);
+canvas.addEventListener("mouseup", () => mouse.down = false);
+
+// --- SHOOT ---
+function shoot() {
+  const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+  bullets.push({
+    x: player.x,
+    y: player.y,
+    dx: Math.cos(angle) * 7,
+    dy: Math.sin(angle) * 7,
+    size: 4
+  });
+  playShootSound();
+}
+
+function playShootSound() {
+  const ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ctxAudio.createOscillator();
+  const g = ctxAudio.createGain();
+  o.type = "square";
+  o.connect(g);
+  g.connect(ctxAudio.destination);
+  o.frequency.value = 400;
+  g.gain.setValueAtTime(0.2, ctxAudio.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctxAudio.currentTime + 0.2);
+  o.start();
+  o.stop(ctxAudio.currentTime + 0.2);
+}
+
+// --- ENEMIES ---
+function spawnEnemy() {
+  const side = Math.floor(Math.random() * 4);
+  let x, y;
+  if (side === 0) { x = 0; y = Math.random() * 600; }
+  if (side === 1) { x = 800; y = Math.random() * 600; }
+  if (side === 2) { x = Math.random() * 800; y = 0; }
+  if (side === 3) { x = Math.random() * 800; y = 600; }
+  enemies.push({ x, y, size: 20, speed: 1 + Math.random() * 1.5 });
+}
+
+// --- GAME LOOP ---
+let shootTimer = 0;
+function update() {
+  ctx.clearRect(0, 0, 800, 600);
+
+  // Move player
+  if (keys["w"]) player.y -= player.speed;
+  if (keys["s"]) player.y += player.speed;
+  if (keys["a"]) player.x -= player.speed;
+  if (keys["d"]) player.x += player.speed;
+  player.x = Math.max(0, Math.min(800, player.x));
+  player.y = Math.max(0, Math.min(600, player.y));
+
+  // Shoot
+  shootTimer++;
+  if (mouse.down && shootTimer > 10) {
+    shoot();
+    shootTimer = 0;
+  }
+
+  // Bullets
+  bullets.forEach((b) => {
+    b.x += b.dx;
+    b.y += b.dy;
+  });
+  bullets = bullets.filter((b) => b.x > 0 && b.x < 800 && b.y > 0 && b.y < 600);
+
+  // Enemies
+  enemies.forEach((e) => {
+    const angle = Math.atan2(player.y - e.y, player.x - e.x);
+    e.x += Math.cos(angle) * e.speed;
+    e.y += Math.sin(angle) * e.speed;
+
+    // collision with player → jumpscare!
+    const dist = Math.hypot(player.x - e.x, player.y - e.y);
+    if (dist < e.size + player.size) triggerJumpscare();
+  });
+
+  // Bullet collision
+  bullets.forEach((b, bi) => {
+    enemies.forEach((e, ei) => {
+      const dist = Math.hypot(b.x - e.x, b.y - e.y);
+      if (dist < e.size) {
+        enemies.splice(ei, 1);
+        bullets.splice(bi, 1);
+        score++;
+        hudScore.textContent = score;
+      }
+    });
+  });
+
+  // Draw enemies
+  ctx.fillStyle = "red";
+  enemies.forEach((e) => {
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Draw bullets
+  ctx.fillStyle = "yellow";
+  bullets.forEach((b) => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Draw player
+  ctx.fillStyle = "lime";
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (Math.random() < 0.02 && enemies.length < 10) spawnEnemy();
+
+  requestAnimationFrame(update);
+}
+
+// --- JUMPSCARE EFFECT ---
+function triggerJumpscare() {
+  scareDiv.style.display = "flex";
+  playScream();
+  setTimeout(() => {
+    scareDiv.style.display = "none";
+    resetGame();
+  }, 1500);
+}
+
+function playScream() {
+  const audio = new Audio("https://www.myinstants.com/media/sounds/wilhelm_scream.mp3");
+  audio.play();
+}
+
+// --- RESET ---
+function resetGame() {
+  enemies = [];
+  bullets = [];
+  score = 0;
+  hudScore.textContent = "0";
+  player.x = 400;
+  player.y = 300;
+}
+
+update();
+</script>
+</body>
+</html>
